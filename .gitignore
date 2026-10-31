@@ -1,0 +1,23 @@
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Competition datasets
+data/
+*.npz
+
+# Experimentation & Jupyter Notebooks
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/
+
+# OS & Editor specific files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Ensure critical submission files and final weights are never ignored
+!model.py
+!requirements.txt
