@@ -4,7 +4,7 @@ import sys
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from dataset import BatchSampler, SeriesDataset
-from net import ConvNet
+from net import ConvNet, StageConfig
 from exam import exam
 
 
@@ -134,7 +134,27 @@ def main() -> int:
     )
 
     # Init model
-    model = ConvNet(in_channels=4, num_classes=8).to(device)
+    stages = [
+        StageConfig(
+            res_kernel_size=7, down_kernel_size=5, num_blocks=2, out_channels=48
+        ),
+        StageConfig(
+            res_kernel_size=5, down_kernel_size=5, num_blocks=2, out_channels=64
+        ),
+        StageConfig(
+            res_kernel_size=3, down_kernel_size=3, num_blocks=2, out_channels=72
+        ),
+        StageConfig(
+            res_kernel_size=3, down_kernel_size=-1, num_blocks=2, out_channels=-1
+        ),
+    ]
+    model = ConvNet(
+        stem_channels=32,
+        stem_kernel_size=7,
+        stages=stages,
+        dense_hidden_dim=72,
+    ).to(device)
+
     criterion = nn.CrossEntropyLoss()
 
     # Init optimizer and scheduler
@@ -196,7 +216,9 @@ def main() -> int:
         device=device,
     )
 
-    print(f"Training finished. Best Validation Accuracy: {best_val_acc:.4f}\nFinal Score: {final_score:.4f}")
+    print(
+        f"Training finished. Best Validation Accuracy: {best_val_acc:.4f}\nFinal Score: {final_score:.4f}"
+    )
     return 0
 
 

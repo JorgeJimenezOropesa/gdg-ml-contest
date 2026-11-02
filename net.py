@@ -1,5 +1,14 @@
 import torch
 import torch.nn as nn
+from dataclasses import dataclass
+
+
+@dataclass
+class StageConfig:
+    res_kernel_size: int
+    down_kernel_size: int
+    num_blocks: int
+    out_channels: int
 
 
 class ResBlock1D(nn.Module):
@@ -38,77 +47,82 @@ class ResBlock1D(nn.Module):
 
 
 class ConvNet(nn.Module):
-    def __init__(self, in_channels: int = 4, num_classes: int = 8):
+    def __init__(
+        self,
+        stem_channels: int,
+        stem_kernel_size: int,
+        stages: list[StageConfig],
+        dense_hidden_dim: int,
+        in_channels: int = 4,
+        num_classes: int = 8,
+    ):
         super().__init__()
 
-        # Stem: maps raw 4 sensor channels to 32 feature channels (L=256)
+        # Initial projection of channels to (256, 4) to (128, 32)
         self.stem = nn.Conv1d(
             in_channels=in_channels,
-            out_channels=32,
-            kernel_size=7,
-            padding="same",
+            out_channels=stem_channels,
+            kernel_size=stem_kernel_size,
+            padding=stem_kernel_size // 2,
             padding_mode="zeros",
+            stride=2,
             bias=True,
         )
 
-        # Stage 1: resolution 256, 32 channels
-        self.stage1 = nn.Sequential(
-            ResBlock1D(channels=32, kernel_size=7),
-            ResBlock1D(channels=32, kernel_size=7),
-        )
-        self.pool1 = nn.AvgPool1d(kernel_size=2, stride=2)  # 256 -> 128
+        # The stages of the net
+        self.stages = nn.ModuleList()
+        current_channels = stem_channels
 
-        # Stage 2: resolution 128, 32 channels
-        self.stage2 = nn.Sequential(
-            ResBlock1D(channels=32, kernel_size=5),
-            ResBlock1D(channels=32, kernel_size=5),
-        )
-        self.pool2 = nn.AvgPool1d(kernel_size=2, stride=2)  # 128 -> 64
+        for idx, stage_cfg in enumerate(stages):
+            layers: list[nn.Module] = []
 
-        # Stage 3: resolution 64, 32 channels
-        self.stage3 = nn.Sequential(
-            ResBlock1D(channels=32, kernel_size=3),
-            ResBlock1D(channels=32, kernel_size=3),
-        )
-        self.pool3 = nn.AvgPool1d(kernel_size=2, stride=2)  # 64 -> 32
+            # Chain residual blocks
+            for _ in range(stage_cfg.num_blocks):
+                layers.append(
+                    ResBlock1D(
+                        channels=current_channels,
+                        kernel_size=stage_cfg.res_kernel_size,
+                    )
+                )
 
-        # Stage 4: resolution 32, 32 channels
-        self.stage4 = nn.Sequential(
-            ResBlock1D(channels=32, kernel_size=3),
-            ResBlock1D(channels=32, kernel_size=3),
-        )
+            # Downsample temporal dimension and adjust channels
+            if idx < len(stages) - 1:
+                # All stages except for the last one should downsample
+                layers.append(
+                    nn.Conv1d(
+                        in_channels=current_channels,
+                        out_channels=stage_cfg.out_channels,
+                        kernel_size=stage_cfg.down_kernel_size,
+                        padding=stage_cfg.down_kernel_size // 2,
+                        stride=2,
+                        bias=False,
+                    )
+                )
+                current_channels = stage_cfg.out_channels
+            else:
+                # Last stage should not downsample, but activate
+                layers.append(nn.BatchNorm1d(current_channels))
+                layers.append(nn.ReLU())
 
-        # Global Average Pooling: collapses temporal length (B, 32, 32) -> (B, 32, 1)
+            self.stages.append(nn.Sequential(*layers))
+
+        # Global average pooling collapses temporal length (B, C, L) -> (B, C, 1)
         self.gap = nn.AdaptiveAvgPool1d(1)
 
-        # Linear classification head directly from pooled features (32 -> 8)
+        # Classification head
         self.classifier = nn.Sequential(
-            nn.Linear(32, 32), nn.ReLU(), nn.Linear(32, num_classes)
+            nn.Linear(current_channels, dense_hidden_dim),
+            nn.ReLU(),
+            nn.Linear(dense_hidden_dim, num_classes),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Stem
-        x = self.stem(x)  # (Batch, 32, 256)
+        # x = self.input_pool(x)
+        x = self.stem(x)
 
-        # Stage 1
-        x = self.stage1(x)  # (Batch, 32, 256)
-        x = self.pool1(x)  # (Batch, 32, 128)
+        for stage in self.stages:
+            x = stage(x)
 
-        # Stage 2
-        x = self.stage2(x)  # (Batch, 32, 128)
-        x = self.pool2(x)  # (Batch, 32, 64)
-
-        # Stage 3
-        x = self.stage3(x)  # (Batch, 32, 64)
-        x = self.pool3(x)  # (Batch, 32, 32)
-
-        # Stage 4
-        x = self.stage4(x)  # (Batch, 32, 32)
-
-        # Global average pooling and flatten
-        x = self.gap(x)  # (Batch, 32, 1)
-        x = torch.flatten(x, start_dim=1)  # (Batch, 32)
-
-        # Logits
-        logits = self.classifier(x)  # (Batch, 8)
-        return logits
+        x = self.gap(x)
+        x = torch.flatten(x, start_dim=1)
+        return self.classifier(x)
