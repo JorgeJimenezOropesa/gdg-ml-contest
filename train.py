@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from dataset import BatchSampler, SeriesDataset
 from net import ConvNet
+from exam import exam
 
 
 def train_one_epoch(
@@ -187,7 +188,15 @@ def main() -> int:
             best_val_acc = val_acc
             torch.save(model.state_dict(), "weights.pt")
 
-    print(f"Training finished. Best Validation Accuracy: {best_val_acc:.4f}")
+    # Final evaluation on the validation set after training
+    final_score = exam(
+        model=model,
+        dataloader=val_loader,
+        criterion=criterion,
+        device=device,
+    )
+
+    print(f"Training finished. Best Validation Accuracy: {best_val_acc:.4f}\nFinal Score: {final_score:.4f}")
     return 0
 
 
