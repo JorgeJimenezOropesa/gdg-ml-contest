@@ -11,12 +11,16 @@ data/
 # Experimentation & Jupyter Notebooks
 .ipynb_checkpoints/
 */.ipynb_checkpoints/
+results/
 
 # OS & Editor specific files
 .DS_Store
 Thumbs.db
 .idea/
 .vscode/
+
+# Python cache
+__pycache__/
 
 # Ensure critical submission files and final weights are never ignored
 !model.py
