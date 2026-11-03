@@ -6,6 +6,7 @@ from tqdm import tqdm
 from dataset import BatchSampler, SeriesDataset
 from net import ConvNet, StageConfig
 from exam import exam
+import copy
 
 
 def train_one_epoch(
@@ -99,7 +100,7 @@ def main() -> int:
     train_path = "data/train_split.npz"
     val_path = "data/val_split.npz"
     batch_size = 128
-    epochs = 40
+    epochs = 12
     max_lr = 1e-3
     weight_decay = 1e-2
 
@@ -136,23 +137,22 @@ def main() -> int:
     # Init model
     stages = [
         StageConfig(
-            res_kernel_size=7, down_kernel_size=5, num_blocks=2, out_channels=48
+            res_kernel_size=7, down_kernel_size=5, num_blocks=2, out_channels=32
         ),
         StageConfig(
-            res_kernel_size=5, down_kernel_size=5, num_blocks=2, out_channels=64
+            res_kernel_size=5, down_kernel_size=5, num_blocks=2, out_channels=48
         ),
         StageConfig(
-            res_kernel_size=3, down_kernel_size=3, num_blocks=2, out_channels=72
+            res_kernel_size=3, down_kernel_size=3, num_blocks=2, out_channels=64
         ),
         StageConfig(
             res_kernel_size=3, down_kernel_size=-1, num_blocks=2, out_channels=-1
         ),
     ]
     model = ConvNet(
-        stem_channels=32,
-        stem_kernel_size=7,
+        stem_channels=24,
+        stem_kernel_size=9,
         stages=stages,
-        dense_hidden_dim=72,
     ).to(device)
 
     criterion = nn.CrossEntropyLoss()
@@ -173,11 +173,13 @@ def main() -> int:
     )
 
     best_val_acc = 0.0
+    best_weights: dict[str, torch.Tensor] | None = None
 
     print(
         f"Starting training on {train_sampler.total_samples} balanced samples "
         f"({train_sampler.class_samples} per class) for {epochs} epochs..."
     )
+
     for epoch in range(epochs):
         train_loss, train_acc = train_one_epoch(
             model=model,
@@ -203,12 +205,21 @@ def main() -> int:
             f"Val Loss: {val_loss:.4f} - Val Acc: {val_acc:.4f}"
         )
 
-        # Save checkpoint as weights.pt if validation accuracy improves
+        # Store best weights temporarily
         if val_acc > best_val_acc:
             best_val_acc = val_acc
-            torch.save(model.state_dict(), "weights.pt")
+            best_weights = copy.deepcopy(model.state_dict())
+
+    # Restore the best validation state directly from memory
+    print("Loading best weights...")
+    if best_weights is not None:
+        model.load_state_dict(best_weights)
+
+    print("Evaluating model...")
+    model.eval()
 
     # Final evaluation on the validation set after training
+    print("Examining model...")
     final_score = exam(
         model=model,
         dataloader=val_loader,
@@ -219,6 +230,22 @@ def main() -> int:
     print(
         f"Training finished. Best Validation Accuracy: {best_val_acc:.4f}\nFinal Score: {final_score:.4f}"
     )
+
+    # Directly export best state to ONNX
+    print("Exporting to onnx...")
+    onnx_path = "model.onnx"
+    dummy_input = torch.randn(1, 4, 256, device=device)
+    torch.onnx.export(
+        model,
+        dummy_input,
+        onnx_path,
+        input_names=["input"],
+        output_names=["logits"],
+        dynamic_axes={"input": {0: "batch"}, "logits": {0: "batch"}},
+        opset_version=17,
+    )
+    print(f"Model exported directly to {onnx_path}")
+
     return 0
 
 
