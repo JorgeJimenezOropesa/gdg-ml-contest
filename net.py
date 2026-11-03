@@ -5,8 +5,8 @@ from dataclasses import dataclass
 
 @dataclass
 class StageConfig:
-    res_kernel_size: int
-    down_kernel_size: int
+    res_kernel_size: int  # odd
+    down_kernel_size: int  # odd
     num_blocks: int
     out_channels: int
 
@@ -52,7 +52,6 @@ class ConvNet(nn.Module):
         stem_channels: int,
         stem_kernel_size: int,
         stages: list[StageConfig],
-        dense_hidden_dim: int,
         in_channels: int = 4,
         num_classes: int = 8,
     ):
@@ -111,18 +110,20 @@ class ConvNet(nn.Module):
 
         # Classification head
         self.classifier = nn.Sequential(
-            nn.Linear(current_channels, dense_hidden_dim),
-            nn.ReLU(),
-            nn.Linear(dense_hidden_dim, num_classes),
+            nn.Linear(current_channels, num_classes),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x = self.input_pool(x)
+        # Initial dimension widening
         x = self.stem(x)
 
+        # Stages
         for stage in self.stages:
             x = stage(x)
 
+        # Channel collapsing
         x = self.gap(x)
         x = torch.flatten(x, start_dim=1)
+
+        # Classify
         return self.classifier(x)
