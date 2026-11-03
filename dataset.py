@@ -6,6 +6,7 @@ from torch.utils.data import Dataset
 from torch.utils.data import Sampler
 import math
 
+from preprocess import fill_nan
 from competition_api import N_CLASSES, load_dataset
 
 
@@ -22,13 +23,11 @@ class SeriesDataset(Dataset):
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
         # Extract sample array as an independent float32 copy
-        x = np.array(self.series[idx], dtype=np.float32, copy=True)
+        raw_x = np.array(self.series[idx])
         y = int(self.labels[idx])
 
-        # TODO: GESTIONAR LOS NANS
-        # Replace NaNs with zeros if present
-        if np.isnan(x).any():
-            x = np.nan_to_num(x, nan=0.0)
+        # Handle NaNs
+        x = fill_nan(raw_x)
 
         # Apply data augmentation during training only
         if self.is_train:
