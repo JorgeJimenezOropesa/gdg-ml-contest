@@ -2,7 +2,7 @@ from pathlib import Path
 import numpy as np
 import onnxruntime as ort
 from competition_api import ABSTAIN, Sample
-from preprocess import preprocess_sample
+from preprocess import inference_preprocess_sample
 
 HERE = Path(__file__).parent
 MODEL_PATH = HERE / "model.onnx"
@@ -27,11 +27,11 @@ class Model:
 
     def predict(self, x: Sample) -> int:
         # Handle NaNs
-        series = preprocess_sample(x.series, x.meta)
+        crops = inference_preprocess_sample(x.series, x.meta)
 
-        # Reshape to batch dimension: (1, 4, 256)
-        input_data = np.expand_dims(series, axis=0)
+        # Reshape to batch dimension: (1, 4, 128) or (2, 4, 128)
+        input_data = np.stack(crops, axis=0)
 
         # Inference
         logits = self.session.run(None, {self.input_name: input_data})[0]
-        return int(np.argmax(logits, axis=1)[0])
+        return int(np.argmax(logits.mean(axis=0)))

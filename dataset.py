@@ -6,7 +6,7 @@ from torch.utils.data import Dataset
 from torch.utils.data import Sampler
 import math
 
-from preprocess import preprocess_sample
+from preprocess import train_preprocess_sample
 from competition_api import N_CLASSES, load_dataset
 
 
@@ -29,7 +29,7 @@ class SeriesDataset(Dataset):
         meta = {k: v[idx].item() for k, v in self.meta.items()}
 
         # Handle NaNs
-        x = preprocess_sample(raw_x, meta)
+        x = train_preprocess_sample(raw_x, meta)
 
         # Apply data augmentation during training only
         if self.is_train:

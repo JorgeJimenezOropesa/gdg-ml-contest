@@ -1,10 +1,43 @@
 import numpy as np
 
 
-def preprocess_sample(series: np.ndarray, meta: dict):
+def inference_preprocess_sample(series: np.ndarray, meta: dict):
     sample_rate = meta["sample_rate"]
+
+    # Handle nans
     series = fill_nan(series)
-    series = match_sample_rate(series, sample_rate)
+
+    # Adjust series so frequency matches
+    # If sample rate is 1, return both halfs
+    # for better accuracy on inference
+    if sample_rate == 1:
+        series_list = [series[:, 0:128], series[:, 128:256]]
+    else:  # sample rate == 2
+        series = series.reshape(series.shape[0], -1, 2).mean(axis=-1)
+        series_list = [series]
+
+    # Normalize
+    series_list = [normalize(s) for s in series_list]
+
+    return series_list
+
+
+def train_preprocess_sample(series: np.ndarray, meta: dict):
+    sample_rate = meta["sample_rate"]
+
+    # Handle nans
+    series = fill_nan(series)
+
+    # Adjust series so frequency matches
+    if sample_rate == 1:
+        offset = np.random.randint(0, 128)
+        series = series[:, offset : offset + 128]
+    else:  # sample rate == 2
+        series = series.reshape(series.shape[0], -1, 2).mean(axis=-1)
+
+    # Normalize channels
+    series = normalize(series)
+
     return series
 
 
@@ -38,9 +71,10 @@ def fill_nan(series: np.ndarray) -> np.ndarray:
     return series
 
 
-def match_sample_rate(series: np.ndarray, sample_rate: float) -> np.ndarray:
-    if sample_rate == 1:
-        offset = np.random.randint(0, 128)
-        return series[:, offset : offset + 128]
-    else:  # sample rate == 2
-        return series.reshape(series.shape[0], -1, 2).mean(axis=-1)
+def normalize(series: np.ndarray) -> np.ndarray:
+    """Apply per-sample, per-channel Z-score normalization in float32."""
+    mean = series.mean(axis=-1, keepdims=True)
+    std = series.std(axis=-1, keepdims=True)
+    # Prevent division by zero on constant channels or dead sensors filled with 0.0
+    safe_std = np.where(std > np.float32(1e-6), std, np.float32(1.0))
+    return (series - mean) / safe_std
