@@ -2,7 +2,7 @@ from pathlib import Path
 import numpy as np
 import onnxruntime as ort
 from competition_api import ABSTAIN, Sample
-from preprocess import fill_nan
+from preprocess import preprocess_sample
 
 HERE = Path(__file__).parent
 MODEL_PATH = HERE / "model.onnx"
@@ -27,7 +27,7 @@ class Model:
 
     def predict(self, x: Sample) -> int:
         # Handle NaNs
-        series = fill_nan(x.series)
+        series = preprocess_sample(x.series, x.meta)
 
         # Reshape to batch dimension: (1, 4, 256)
         input_data = np.expand_dims(series, axis=0)

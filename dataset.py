@@ -6,7 +6,7 @@ from torch.utils.data import Dataset
 from torch.utils.data import Sampler
 import math
 
-from preprocess import fill_nan
+from preprocess import preprocess_sample
 from competition_api import N_CLASSES, load_dataset
 
 
@@ -16,6 +16,7 @@ class SeriesDataset(Dataset):
         ds = load_dataset(npz_path)
         self.series = ds.series  # Shape: (N, 4, 256)
         self.labels = ds.labels  # Shape: (N,)
+        self.meta = ds.meta
         self.is_train = is_train
 
     def __len__(self) -> int:
@@ -25,9 +26,10 @@ class SeriesDataset(Dataset):
         # Extract sample array as an independent float32 copy
         raw_x = np.array(self.series[idx])
         y = int(self.labels[idx])
+        meta = {k: v[idx].item() for k, v in self.meta.items()}
 
         # Handle NaNs
-        x = fill_nan(raw_x)
+        x = preprocess_sample(raw_x, meta)
 
         # Apply data augmentation during training only
         if self.is_train:

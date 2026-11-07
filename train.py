@@ -137,21 +137,21 @@ def main() -> int:
     # Init model
     stages = [
         StageConfig(
-            res_kernel_size=7, down_kernel_size=5, num_blocks=2, out_channels=32
+            res_kernel_size=7, down_kernel_size=5, num_blocks=3, out_channels=32
         ),
         StageConfig(
-            res_kernel_size=5, down_kernel_size=5, num_blocks=2, out_channels=48
+            res_kernel_size=5, down_kernel_size=5, num_blocks=3, out_channels=48
         ),
         StageConfig(
-            res_kernel_size=3, down_kernel_size=3, num_blocks=2, out_channels=64
+            res_kernel_size=5, down_kernel_size=3, num_blocks=9, out_channels=64
         ),
         StageConfig(
-            res_kernel_size=3, down_kernel_size=-1, num_blocks=2, out_channels=-1
+            res_kernel_size=3, down_kernel_size=3, num_blocks=3, out_channels=-1
         ),
     ]
     model = ConvNet(
         stem_channels=24,
-        stem_kernel_size=9,
+        stem_kernel_size=13,
         stages=stages,
     ).to(device)
 
@@ -234,7 +234,7 @@ def main() -> int:
     # Directly export best state to ONNX
     print("Exporting to onnx...")
     onnx_path = "model.onnx"
-    dummy_input = torch.randn(1, 4, 256, device=device)
+    dummy_input = torch.randn(1, 4, 128, device=device)
     torch.onnx.export(
         model,
         dummy_input,

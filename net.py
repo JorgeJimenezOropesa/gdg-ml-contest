@@ -64,7 +64,7 @@ class ConvNet(nn.Module):
             kernel_size=stem_kernel_size,
             padding=stem_kernel_size // 2,
             padding_mode="zeros",
-            stride=2,
+            stride=1,
             bias=True,
         )
 
