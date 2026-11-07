@@ -7,6 +7,7 @@ from dataset import BatchSampler, SeriesDataset
 from net import ConvNet, StageConfig
 from exam import exam
 import copy
+import torch.nn.functional as F
 
 
 def train_one_epoch(
@@ -95,6 +96,29 @@ def evaluate(
     return val_loss, val_acc
 
 
+"""
+class FocalLoss(nn.Module):
+    def __init__(self, gamma=2.0, reduction='mean'):
+        super().__init__()
+        self.gamma = gamma
+        self.reduction = reduction
+
+    def forward(self, inputs, targets):
+        ce_loss = F.cross_entropy(inputs, targets, reduction='none')
+        
+        
+        pt = torch.exp(-ce_loss) 
+        
+        focal_loss = ((1 - pt) ** self.gamma) * ce_loss
+        
+        if self.reduction == 'mean':
+            return focal_loss.mean()
+        elif self.reduction == 'sum':
+            return focal_loss.sum()
+        return focal_loss
+"""
+
+
 def main() -> int:
     # Training configuration
     train_path = "data/train_split.npz"
@@ -155,7 +179,25 @@ def main() -> int:
         stages=stages,
     ).to(device)
 
-    criterion = nn.CrossEntropyLoss()
+    # Define class weights for the loss function
+    class_weights = torch.ones(8)
+
+    # Manually set class weights based on the dataset's class distribution
+    class_weights[0] = 1.0
+    class_weights[1] = 0.50  
+    class_weights[2] = 1.0
+    class_weights[3] = 1.0
+    class_weights[4] = 1.0
+    class_weights[5] = 1.0
+    class_weights[6] = 1.25  
+    class_weights[7] = 0.85 
+    
+
+    class_weights = class_weights.to(device)
+
+    criterion = nn.CrossEntropyLoss(weight=class_weights)
+
+    # criterion = FocalLoss(gamma=2.0)
 
     # Init optimizer and scheduler
     optimizer = torch.optim.AdamW(
