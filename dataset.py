@@ -4,10 +4,12 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 from torch.utils.data import Sampler
-import math
+import math, os
 
 from preprocess import train_preprocess_sample
 from competition_api import N_CLASSES, load_dataset
+from augmentations import augment
+from config import AUGMENT
 
 
 class SeriesDataset(Dataset):
@@ -18,30 +20,38 @@ class SeriesDataset(Dataset):
         self.labels = ds.labels  # Shape: (N,)
         self.meta = ds.meta
         self.is_train = is_train
+        self._rng: np.random.Generator | None = None
+        self._rng_pid: int | None = None
 
     def __len__(self) -> int:
         return len(self.labels)
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
         # Extract sample array as an independent float32 copy
-        raw_x = np.array(self.series[idx])
+        raw_x = np.array(self.series[idx], dtype=np.float32)
         y = int(self.labels[idx])
         meta = {k: v[idx].item() for k, v in self.meta.items()}
 
-        # Handle NaNs
-        x = train_preprocess_sample(raw_x, meta)
-
         # Apply data augmentation during training only
         if self.is_train:
-            x = self.augment(x)
+            raw_x = augment(raw_x, AUGMENT, self._get_rng())
+
+        # Handle NaNs
+        x = train_preprocess_sample(raw_x, meta)
 
         tensor_x = torch.from_numpy(x)
         tensor_y = torch.tensor(y, dtype=torch.long)
         return tensor_x, tensor_y
 
-    def augment(self, x: np.ndarray) -> np.ndarray:
-        # Placeholder for future time-series augmentations
-        return x
+
+    def _get_rng(self) -> np.random.Generator:
+        # Each worker of the DataLoader is a separate process: we create a dedicated RNG for each 
+        # process to avoid generating the same augmentations across workers.
+        pid = os.getpid()
+        if self._rng is None or self._rng_pid != pid:
+            self._rng = np.random.default_rng()
+            self._rng_pid = pid
+        return self._rng
 
 
 class BatchSampler(Sampler[list[int]]):
