@@ -6,22 +6,17 @@ class AugmentConfig:
     # Allows deactivation of augmentations. False if we don't want to augmentate the data
     enabled: bool = True
 
-    # Soft polynomial tendency
-    poly_prob: float = 0.3
-    poly_linear_max: float = 1.0
-    poly_quad_max: float = 0.5
-    # False if we want the same tendency for all channels
+    poly_prob: float = 0.819816158610183
+    poly_linear_max: float = 0.8016791720261657
+    poly_quad_max: float = 0.14420613635145557
     poly_per_channel: bool = False
 
-    # Gaussian noise (independent from the channel)
-    noise_prob: float = 0.9
-    noise_rel_range: tuple[float, float] = (0.15, 0.5)
+    noise_prob: float = 0.8590477538171948
+    noise_rel_range: tuple[float, float] = (0.1024621596530517, 0.721041448729279)
 
-    # NaN intervals
-    nan_prob: float = 0.5
-    nan_intervals_mean: float = 0.6 # mean number of NaN per channel
-    nan_len_mean: float = 3.0
-    nan_len_max: int = 40
-
+    nan_prob: float = 0.29404034812512714
+    nan_intervals_mean: float = 1.7955251393881067
+    nan_len_mean: float = 18.054766797037736
+    nan_len_max: int = 42
 
 AUGMENT = AugmentConfig()
