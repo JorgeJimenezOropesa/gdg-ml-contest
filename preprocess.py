@@ -41,33 +41,32 @@ def train_preprocess_sample(series: np.ndarray, meta: dict):
     return series
 
 
+_COORDS = {}
+
+
 def fill_nan(series: np.ndarray) -> np.ndarray:
-    """Interpolate NaNs linearly across the temporal axis for each sensor channel."""
+    """Interpolate NaNs linearly across the temporal axis, all channels in ONE np.interp call."""
     series = np.array(series, dtype=np.float32, copy=True)
+    nan = np.isnan(series)
+
+    if not nan.any():
+        return series
     n_channels, length = series.shape
-    time_indices = np.arange(length)
 
-    for ch in range(n_channels):
-        channel_data = series[ch]
-        nan_mask = np.isnan(channel_data)
+    dead = nan.all(axis=1)
+    
+    if dead.any():  # all NaNs
+        series[dead] = 0.0
+        nan[dead] = False
 
-        if not nan_mask.any():
-            continue
+    co = _COORDS.get(series.shape)
 
-        # If an entire sensor is dead (all NaNs), fallback to zero
-        if nan_mask.all():
-            channel_data[:] = 0.0
-            continue
+    if co is None:  
+        i = np.arange(n_channels * length)
+        co = _COORDS[series.shape] = (i // length) * 1e7 + (i % length)
 
-        # np.interp linearly interpolates internal gaps and repeats border values
-        valid_indices = time_indices[~nan_mask]
-        valid_values = channel_data[~nan_mask]
-        channel_data[nan_mask] = np.interp(
-            time_indices[nan_mask],
-            valid_indices,
-            valid_values,
-        )
-
+    flat, nanf = series.reshape(-1), nan.reshape(-1)
+    flat[nanf] = np.interp(co[nanf], co[~nanf], flat[~nanf])
     return series
 
 
