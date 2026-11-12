@@ -101,9 +101,9 @@ def main() -> int:
     train_path = "data/train_split.npz"
     val_path = "data/val_split.npz"
     batch_size = 128
-    epochs = 12
-    max_lr = 1e-3
-    weight_decay = 1e-2
+    epochs = 50
+    max_lr = 0.004375552246381812
+    weight_decay = 7.998469227079363e-05
 
     # Use GPU if possible
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -137,46 +137,30 @@ def main() -> int:
 
     # Init model
     stages = [
-        StageConfig(
-            res_kernel_size=7, down_kernel_size=5, num_blocks=3, out_channels=32
-        ),
-        StageConfig(
-            res_kernel_size=5, down_kernel_size=5, num_blocks=3, out_channels=48
-        ),
-        StageConfig(
-            res_kernel_size=5, down_kernel_size=3, num_blocks=9, out_channels=64
-        ),
-        StageConfig(
-            res_kernel_size=3, down_kernel_size=3, num_blocks=3, out_channels=-1
-        ),
+        StageConfig(res_kernel_size=5, down_kernel_size=7, num_blocks=1, out_channels=24),
+        StageConfig(res_kernel_size=5, down_kernel_size=7, num_blocks=3, out_channels=48),
+        StageConfig(res_kernel_size=9, down_kernel_size=-1, num_blocks=4, out_channels=-1),
     ]
     model = ConvNet(
-        stem_channels=24,
-        stem_kernel_size=13,
+        stem_channels=64,
+        stem_kernel_size=5,
         stages=stages,
     ).to(device)
 
     # Define class weights for the loss function
-    class_weights = torch.ones(8)
+    class_weights = torch.tensor([
+        1.0160834567543418, 0.10118666140028243, 0.17769307654154717, 1.0501353357227972,
+        0.8342551958646349, 1.8268189221969722, 2.376399561211156, 2.5987932925248733,
+    ]).to(device)
 
-    # Manually set class weights based on the dataset's class distribution
-    class_weights[0] = 1.0
-    class_weights[1] = 0.50
-    class_weights[2] = 1.0
-    class_weights[3] = 1.0
-    class_weights[4] = 1.0
-    class_weights[5] = 1.0
-    class_weights[6] = 1.25
-    class_weights[7] = 0.85
-
-    class_weights = class_weights.to(device)
-
-    criterion = nn.CrossEntropyLoss(weight=class_weights)
+    criterion = nn.CrossEntropyLoss(weight=class_weights, label_smoothing=0.03522350778728246)
 
     # Init optimizer and scheduler
     optimizer = torch.optim.AdamW(
         model.parameters(),
+        lr=max_lr,
         weight_decay=weight_decay,
+        eps=6.336816125511985e-05,
     )
 
     total_steps = len(train_loader) * epochs
@@ -184,8 +168,11 @@ def main() -> int:
         optimizer,
         max_lr=max_lr,
         total_steps=total_steps,
-        pct_start=0.20,
+        pct_start=0.07126090236240201,
         anneal_strategy="cos",
+        div_factor=5.192098738100838,
+        final_div_factor=7574.835818578024,
+        three_phase=False,
     )
 
     best_val_acc = 0.0
