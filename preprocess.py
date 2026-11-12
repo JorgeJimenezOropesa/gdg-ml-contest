@@ -5,7 +5,7 @@ def inference_preprocess_sample(series: np.ndarray, meta: dict):
     sample_rate = meta["sample_rate"]
 
     # Handle nans
-    series = fill_nan(series)
+    series = fill_nan(despike(series))
 
     # Adjust series so frequency matches
     # If sample rate is 1, return both halfs
@@ -26,7 +26,7 @@ def train_preprocess_sample(series: np.ndarray, meta: dict):
     sample_rate = meta["sample_rate"]
 
     # Handle nans
-    series = fill_nan(series)
+    series = fill_nan(despike(series))
 
     # Adjust series so frequency matches
     if sample_rate == 1:
@@ -45,7 +45,7 @@ _COORDS = {}
 
 
 def fill_nan(series: np.ndarray) -> np.ndarray:
-    """Interpolate NaNs linearly across the temporal axis, all channels in ONE np.interp call."""
+    """Interpolate NaNs linearly across the temporal axis, all channels in one np.interp call."""
     series = np.array(series, dtype=np.float32, copy=True)
     nan = np.isnan(series)
 
@@ -68,6 +68,27 @@ def fill_nan(series: np.ndarray) -> np.ndarray:
     flat, nanf = series.reshape(-1), nan.reshape(-1)
     flat[nanf] = np.interp(co[nanf], co[~nanf], flat[~nanf])
     return series
+
+def _median(x: np.ndarray) -> np.ndarray:
+    """Faster implementation of np.median to gain speed on large arrays"""
+    h = x.shape[-1] // 2
+    if x.shape[-1] % 2:
+        return np.partition(x, h, axis=-1)[..., h:h + 1]
+    p = np.partition(x, (h - 1, h), axis=-1)
+    return 0.5 * (p[..., h - 1:h] + p[..., h:h + 1])
+
+
+def despike(series: np.ndarray, t: float = 8.0) -> np.ndarray:
+    """Marks spikes as NaN."""
+    x = fill_nan(series)
+    med = _median(x)
+    mad = 1.4826 * _median(np.abs(x - med)) + 1e-6
+    spikes = np.abs(x - med) > t * mad
+    if not spikes.any():
+        return x  # there are no spikes left
+    out = np.array(series, dtype=np.float32, copy=True)
+    out[spikes] = np.nan
+    return out
 
 
 def normalize(series: np.ndarray) -> np.ndarray:
