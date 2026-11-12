@@ -21,6 +21,7 @@ import torch.nn as nn
 import yaml
 from torch.utils.data import DataLoader
 
+from config import AugmentConfig
 from dataset import BatchSampler, SeriesDataset
 from exam import exam
 from net import ConvNet, StageConfig
@@ -112,6 +113,67 @@ def build_model(trial: optuna.Trial, config: dict[str, Any]) -> ConvNet:
     )
 
 
+class FocalLoss(nn.Module):
+    def __init__(
+        self,
+        weight: torch.Tensor | None,
+        gamma: float,
+        label_smoothing: float,
+    ):
+        super().__init__()
+        self.weight = weight
+        self.gamma = gamma
+        self.label_smoothing = label_smoothing
+
+    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        cross_entropy = nn.functional.cross_entropy(
+            inputs,
+            targets,
+            weight=self.weight,
+            reduction="none",
+            label_smoothing=self.label_smoothing,
+        )
+        probabilities = torch.exp(-cross_entropy)
+        return (((1.0 - probabilities) ** self.gamma) * cross_entropy).mean()
+
+
+def build_augmentation_config(
+    trial: optuna.Trial, config: dict[str, Any]
+) -> AugmentConfig:
+    search = config["search"]["augmentation"]
+    noise_rel_min = suggest(
+        trial, "augmentation_noise_rel_min", search["noise_rel_min"]
+    )
+    noise_rel_max = suggest(
+        trial,
+        "augmentation_noise_rel_max",
+        search["noise_rel_max"],
+    )
+    return AugmentConfig(
+        enabled=suggest(trial, "augmentation_enabled", search["enabled"]),
+        poly_prob=suggest(trial, "augmentation_poly_prob", search["poly_prob"]),
+        poly_linear_max=suggest(
+            trial, "augmentation_poly_linear_max", search["poly_linear_max"]
+        ),
+        poly_quad_max=suggest(
+            trial, "augmentation_poly_quad_max", search["poly_quad_max"]
+        ),
+        poly_per_channel=suggest(
+            trial, "augmentation_poly_per_channel", search["poly_per_channel"]
+        ),
+        noise_prob=suggest(trial, "augmentation_noise_prob", search["noise_prob"]),
+        noise_rel_range=tuple(sorted((noise_rel_min, noise_rel_max))),
+        nan_prob=suggest(trial, "augmentation_nan_prob", search["nan_prob"]),
+        nan_intervals_mean=suggest(
+            trial, "augmentation_nan_intervals_mean", search["nan_intervals_mean"]
+        ),
+        nan_len_mean=suggest(
+            trial, "augmentation_nan_len_mean", search["nan_len_mean"]
+        ),
+        nan_len_max=suggest(trial, "augmentation_nan_len_max", search["nan_len_max"]),
+    )
+
+
 def train_epoch(
     model: nn.Module,
     loader: DataLoader,
@@ -131,10 +193,16 @@ def train_epoch(
         scheduler.step()
 
 
-def make_loaders(config: dict[str, Any], batch_size: int) -> tuple[DataLoader, DataLoader, BatchSampler]:
+def make_loaders(
+    config: dict[str, Any],
+    batch_size: int,
+    augment_config: AugmentConfig,
+) -> tuple[DataLoader, DataLoader, BatchSampler]:
     data_config = config["data"]
     runtime = config["runtime"]
-    train_dataset = SeriesDataset(data_config["train"], is_train=True)
+    train_dataset = SeriesDataset(
+        data_config["train"], is_train=True, augment_config=augment_config
+    )
     val_dataset = SeriesDataset(data_config["validation"], is_train=False)
     train_sampler = BatchSampler(train_dataset.labels, batch_size=batch_size)
     train_loader = DataLoader(
@@ -154,10 +222,18 @@ def make_loaders(config: dict[str, Any], batch_size: int) -> tuple[DataLoader, D
 
 
 def make_optimizer(
-    model: nn.Module, config: dict[str, Any], learning_rate: float, weight_decay: float
+    model: nn.Module,
+    config: dict[str, Any],
+    learning_rate: float,
+    weight_decay: float,
+    optimizer_epsilon: float,
 ) -> torch.optim.Optimizer:
-    optimizer_name = config["training"]["optimizer"].lower()
-    optimizer_args = {"lr": learning_rate, "weight_decay": weight_decay}
+    optimizer_name = config["optimizer"].lower()
+    optimizer_args = {
+        "lr": learning_rate,
+        "weight_decay": weight_decay,
+        "eps": optimizer_epsilon,
+    }
     if optimizer_name == "adamw":
         return torch.optim.AdamW(model.parameters(), **optimizer_args)
     if optimizer_name == "adam":
@@ -167,55 +243,114 @@ def make_optimizer(
 
 def make_objective(config: dict[str, Any], device: torch.device):
     def objective(trial: optuna.Trial) -> float:
-        seed_everything(config["runtime"]["seed"] + trial.number)
-        model = build_model(trial, config).to(device)
-        trial.set_user_attr(
-            "parameter_count",
-            sum(parameter.numel() for parameter in model.parameters()),
-        )
-
-        search_training = config["search"]["training"]
-        batch_size = suggest(trial, "batch_size", search_training["batch_size"])
-        train_loader, val_loader, train_sampler = make_loaders(config, batch_size)
-        learning_rate = suggest(trial, "learning_rate", search_training["learning_rate"])
-        weight_decay = suggest(trial, "weight_decay", search_training["weight_decay"])
-        label_smoothing = suggest(
-            trial, "label_smoothing", search_training["label_smoothing"]
-        )
-        epochs = config["training"]["epochs"]
-
-        criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
-        optimizer = make_optimizer(
-            model, config, learning_rate=learning_rate, weight_decay=weight_decay
-        )
-        scheduler_config = config["training"]["scheduler"]
-        if scheduler_config["name"].lower() != "onecycle":
-            raise ValueError(f"Unsupported scheduler: {scheduler_config['name']}")
-        scheduler = torch.optim.lr_scheduler.OneCycleLR(
-            optimizer,
-            max_lr=learning_rate,
-            total_steps=len(train_loader) * epochs,
-            pct_start=scheduler_config["pct_start"],
-            anneal_strategy=scheduler_config["anneal_strategy"],
-        )
-
-        best_score = 0.0
-        for epoch in range(epochs):
-            train_epoch(model, train_loader, criterion, optimizer, scheduler, device)
-            score = exam(
-                model,
-                val_loader,
-                criterion,
-                device,
-                time_budget_seconds=config["evaluation"]["exam_time_budget"],
+        try:
+            seed_everything(config["runtime"]["seed"] + trial.number)
+            model = build_model(trial, config).to(device)
+            trial.set_user_attr(
+                "parameter_count",
+                sum(parameter.numel() for parameter in model.parameters()),
             )
-            best_score = max(best_score, score)
-            trial.report(score, epoch)
-            if trial.should_prune():
-                raise optuna.TrialPruned()
 
-        trial.set_user_attr("train_samples_per_epoch", train_sampler.total_samples)
-        return best_score
+            search_training = config["search"]["training"]
+            batch_size = suggest(trial, "batch_size", search_training["batch_size"])
+            augment_config = build_augmentation_config(trial, config)
+            train_loader, val_loader, train_sampler = make_loaders(
+                config, batch_size, augment_config
+            )
+            learning_rate = suggest(trial, "learning_rate", search_training["learning_rate"])
+            weight_decay = suggest(trial, "weight_decay", search_training["weight_decay"])
+            optimizer_epsilon = suggest(
+                trial, "optimizer_epsilon", search_training["optimizer_epsilon"]
+            )
+            label_smoothing = suggest(
+                trial, "label_smoothing", search_training["label_smoothing"]
+            )
+            epochs = suggest(trial, "epochs", search_training["epochs"])
+            loss_name = suggest(trial, "loss", search_training["loss"])
+            loss_gamma = suggest(trial, "focal_gamma", search_training["focal_gamma"])
+            class_weights = torch.tensor(
+                [
+                    suggest(
+                        trial,
+                        f"class_weight_{class_id}",
+                        search_training["class_weight"],
+                    )
+                    for class_id in range(config["search"]["architecture"]["num_classes"])
+                ],
+                dtype=torch.float32,
+                device=device,
+            )
+
+            if loss_name == "cross_entropy":
+                criterion = nn.CrossEntropyLoss(
+                    weight=class_weights, label_smoothing=label_smoothing
+                )
+            elif loss_name == "focal":
+                criterion = FocalLoss(
+                    weight=class_weights,
+                    gamma=loss_gamma,
+                    label_smoothing=label_smoothing,
+                )
+            else:
+                raise ValueError(f"Unsupported loss: {loss_name}")
+            optimizer_config = dict(config["training"])
+            optimizer_config["optimizer"] = suggest(
+                trial, "optimizer", search_training["optimizer"]
+            )
+            optimizer = make_optimizer(
+                model,
+                optimizer_config,
+                learning_rate=learning_rate,
+                weight_decay=weight_decay,
+                optimizer_epsilon=optimizer_epsilon,
+            )
+            scheduler_config = config["training"]["scheduler"]
+            if scheduler_config["name"].lower() != "onecycle":
+                raise ValueError(f"Unsupported scheduler: {scheduler_config['name']}")
+            scheduler = torch.optim.lr_scheduler.OneCycleLR(
+                optimizer,
+                max_lr=learning_rate,
+                total_steps=len(train_loader) * epochs,
+                pct_start=suggest(trial, "scheduler_pct_start", search_training["scheduler_pct_start"]),
+                anneal_strategy=suggest(
+                    trial, "scheduler_anneal_strategy", search_training["scheduler_anneal_strategy"]
+                ),
+                div_factor=suggest(trial, "scheduler_div_factor", search_training["scheduler_div_factor"]),
+                final_div_factor=suggest(
+                    trial,
+                    "scheduler_final_div_factor",
+                    search_training["scheduler_final_div_factor"],
+                ),
+                three_phase=suggest(
+                    trial, "scheduler_three_phase", search_training["scheduler_three_phase"]
+                ),
+            )
+
+            best_score = 0.0
+            for epoch in range(epochs):
+                train_epoch(model, train_loader, criterion, optimizer, scheduler, device)
+                print(f"Época {epoch} completada - Valorando...")
+                score = exam(
+                    model,
+                    val_loader,
+                    criterion,
+                    device,
+                    time_budget_seconds=config["evaluation"]["exam_time_budget"],
+                )
+                print(f"Época {epoch} completada - Score: {score:.4f}")
+                best_score = max(best_score, score)
+                trial.report(score, epoch)
+                if trial.should_prune():
+                    raise optuna.TrialPruned()
+
+            trial.set_user_attr("train_samples_per_epoch", train_sampler.total_samples)
+
+            torch.cuda.empty_cache()
+            return best_score
+        except torch.cuda.OutOfMemoryError:
+            # Si el modelo no cabe, limpia la gráfica y dile a Optuna que lo pode (descarte)
+            torch.cuda.empty_cache()
+            raise optuna.TrialPruned("Descartado por OOM: Arquitectura demasiado grande para la VRAM.")
 
     return objective
 

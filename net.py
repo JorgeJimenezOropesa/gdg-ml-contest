@@ -54,6 +54,7 @@ class ConvNet(nn.Module):
         stages: list[StageConfig],
         in_channels: int = 4,
         num_classes: int = 8,
+        dense_hidden_dim: int | None = None,
     ):
         super().__init__()
 
@@ -109,9 +110,17 @@ class ConvNet(nn.Module):
         self.gap = nn.AdaptiveAvgPool1d(1)
 
         # Classification head
-        self.classifier = nn.Sequential(
-            nn.Linear(current_channels, num_classes),
-        )
+        classifier_layers: list[nn.Module] = []
+        if dense_hidden_dim is not None:
+            classifier_layers.extend(
+                [
+                    nn.Linear(current_channels, dense_hidden_dim),
+                    nn.ReLU(),
+                ]
+            )
+            current_channels = dense_hidden_dim
+        classifier_layers.append(nn.Linear(current_channels, num_classes))
+        self.classifier = nn.Sequential(*classifier_layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Initial dimension widening

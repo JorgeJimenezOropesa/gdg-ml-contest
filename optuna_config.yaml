@@ -1,12 +1,12 @@
 # All study settings live here. The Python entry point only needs --config.
 data:
   train: data/train_split.npz
-  validation: data/val_split.npz
+  validation: data/test_demo.npz
 
 runtime:
   seed: 42
   device: auto # auto, cpu, or cuda
-  num_workers: 2
+  num_workers: 8
 
 study:
   name: convnet-exam
@@ -20,11 +20,11 @@ study:
     name: tpe
     seed: 42
     multivariate: true
-    n_startup_trials: 20
+    n_startup_trials: 90
   pruner:
     name: hyperband
     min_resource: 2
-    max_resource: 30
+    max_resource: 60
     reduction_factor: 3
 
 training:
@@ -52,7 +52,7 @@ search:
       high: 5
     stem_channels:
       type: categorical
-      choices: [24, 32, 48, 64, 80, 96, 128]
+      choices: [24, 32, 48, 64]
     stem_kernel_size:
       type: categorical
       choices: [3, 5, 7, 9]
@@ -72,11 +72,14 @@ search:
         high: 4
       out_channels:
         type: categorical
-        choices: [24, 32, 48, 64, 80, 96, 128]
+        choices: [24, 32, 48, 64]
   training:
     batch_size:
       type: categorical
-      choices: [64, 128, 256]
+      choices: [64, 128]
+    optimizer:
+      type: categorical
+      choices: [adamw, adam]
     learning_rate:
       type: float
       low: 0.0001
@@ -87,7 +90,95 @@ search:
       low: 0.000001
       high: 0.05
       log: true
+    optimizer_epsilon:
+      type: float
+      low: 0.00000001
+      high: 0.0001
+      log: true
     label_smoothing:
       type: float
       low: 0.0
       high: 0.2
+    epochs:
+      type: int
+      low: 12
+      high: 60
+    loss:
+      type: categorical
+      choices: [cross_entropy, focal]
+    focal_gamma:
+      type: float
+      low: 0.5
+      high: 5.0
+    class_weight:
+      type: float
+      low: 0.1
+      high: 3.0
+      log: true
+    scheduler_pct_start:
+      type: float
+      low: 0.05
+      high: 0.5
+    scheduler_anneal_strategy:
+      type: categorical
+      choices: [cos, linear]
+    scheduler_div_factor:
+      type: float
+      low: 5.0
+      high: 100.0
+      log: true
+    scheduler_final_div_factor:
+      type: float
+      low: 1000.0
+      high: 100000.0
+      log: true
+    scheduler_three_phase:
+      type: categorical
+      choices: [false, true]
+  augmentation:
+    enabled:
+      type: categorical
+      choices: [false, true]
+    poly_prob:
+      type: float
+      low: 0.0
+      high: 1.0
+    poly_linear_max:
+      type: float
+      low: 0.0
+      high: 2.0
+    poly_quad_max:
+      type: float
+      low: 0.0
+      high: 1.0
+    poly_per_channel:
+      type: categorical
+      choices: [false, true]
+    noise_prob:
+      type: float
+      low: 0.0
+      high: 1.0
+    noise_rel_min:
+      type: float
+      low: 0.0
+      high: 1.0
+    noise_rel_max:
+      type: float
+      low: 0.0
+      high: 1.0
+    nan_prob:
+      type: float
+      low: 0.0
+      high: 1.0
+    nan_intervals_mean:
+      type: float
+      low: 0.0
+      high: 2.0
+    nan_len_mean:
+      type: float
+      low: 1.0
+      high: 20.0
+    nan_len_max:
+      type: int
+      low: 4
+      high: 80
