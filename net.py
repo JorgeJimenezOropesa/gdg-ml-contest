@@ -54,7 +54,8 @@ class ConvNet(nn.Module):
         stages: list[StageConfig],
         in_channels: int = 4,
         num_classes: int = 8,
-        dense_hidden_dim: int | None = None,
+        dense_hidden_dim: int | None = 48,
+        n_extra: int = 5,
     ):
         super().__init__()
 
@@ -106,23 +107,22 @@ class ConvNet(nn.Module):
 
             self.stages.append(nn.Sequential(*layers))
 
-        # Global average pooling collapses temporal length (B, C, L) -> (B, C, 1)
-        self.gap = nn.AdaptiveAvgPool1d(1)
-
-        # Classification head
+        # Classification head: [mean over time, max over time, extra inputs] -> MLP
+        in_features = 2 * current_channels + n_extra
         classifier_layers: list[nn.Module] = []
         if dense_hidden_dim is not None:
             classifier_layers.extend(
                 [
-                    nn.Linear(current_channels, dense_hidden_dim),
+                    nn.Linear(in_features, dense_hidden_dim),
                     nn.ReLU(),
+                    nn.Dropout(0.2),
                 ]
             )
-            current_channels = dense_hidden_dim
-        classifier_layers.append(nn.Linear(current_channels, num_classes))
+            in_features = dense_hidden_dim
+        classifier_layers.append(nn.Linear(in_features, num_classes))
         self.classifier = nn.Sequential(*classifier_layers)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, extra: torch.Tensor) -> torch.Tensor:
         # Initial dimension widening
         x = self.stem(x)
 
@@ -130,9 +130,8 @@ class ConvNet(nn.Module):
         for stage in self.stages:
             x = stage(x)
 
-        # Channel collapsing
-        x = self.gap(x)
-        x = torch.flatten(x, start_dim=1)
+        # Pool over time (mean and max) and append the extra inputs
+        feat = torch.cat([x.mean(dim=-1), x.amax(dim=-1), extra], dim=1)
 
         # Classify
-        return self.classifier(x)
+        return self.classifier(feat)

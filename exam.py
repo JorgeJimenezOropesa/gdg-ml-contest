@@ -56,17 +56,18 @@ def exam(
 
 	try:
 		with torch.no_grad():
-			for batch_x, batch_y in dataloader:
-				for sample_x, sample_y in zip(batch_x, batch_y):
+			for batch_x, batch_e, batch_y in dataloader:
+				for sample_x, sample_e, sample_y in zip(batch_x, batch_e, batch_y):
 					if model_time_seconds >= time_budget_seconds:
 						break
 
 					sample_x = sample_x.unsqueeze(0).to(device)
+					sample_e = sample_e.unsqueeze(0).to(device)
 					true_class = int(sample_y.item())
 					if device.type == "cuda":
 						torch.cuda.synchronize(device)
 					start_time = perf_counter()
-					logits = model(sample_x)
+					logits = model(sample_x, sample_e)
 					if device.type == "cuda":
 						torch.cuda.synchronize(device)
 					elapsed_seconds = perf_counter() - start_time

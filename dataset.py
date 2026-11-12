@@ -6,20 +6,26 @@ from torch.utils.data import Dataset
 from torch.utils.data import Sampler
 import math, os
 
-from preprocess import train_preprocess_sample
+from preprocess import train_preprocess_sample, channel_extras
 from competition_api import N_CLASSES, load_dataset
 from augmentations import augment
-from config import AUGMENT
+from config import AUGMENT, AugmentConfig
 
 
 class SeriesDataset(Dataset):
-    def __init__(self, npz_path: str | Path, is_train: bool = True):
+    def __init__(
+        self,
+        npz_path: str | Path,
+        is_train: bool = True,
+        augment_config: AugmentConfig = AUGMENT,
+    ):
         # Load dataset arrays
         ds = load_dataset(npz_path)
         self.series = ds.series  # Shape: (N, 4, 256)
         self.labels = ds.labels  # Shape: (N,)
         self.meta = ds.meta
         self.is_train = is_train
+        self.augment_config = augment_config
         self._rng: np.random.Generator | None = None
         self._rng_pid: int | None = None
 
@@ -34,14 +40,16 @@ class SeriesDataset(Dataset):
 
         # Apply data augmentation during training only
         if self.is_train:
-            raw_x = augment(raw_x, AUGMENT, self._get_rng())
+            raw_x = augment(raw_x, self.augment_config, self._get_rng())
 
         # Handle NaNs
         x = train_preprocess_sample(raw_x, meta)
+        extra = channel_extras(raw_x, meta["sample_rate"])
 
         tensor_x = torch.from_numpy(x)
+        tensor_e = torch.from_numpy(extra)
         tensor_y = torch.tensor(y, dtype=torch.long)
-        return tensor_x, tensor_y
+        return tensor_x, tensor_e, tensor_y
 
 
     def _get_rng(self) -> np.random.Generator:

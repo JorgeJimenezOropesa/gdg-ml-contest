@@ -2,7 +2,7 @@ from pathlib import Path
 import numpy as np
 import onnxruntime as ort
 from competition_api import ABSTAIN, Sample
-from preprocess import inference_preprocess_sample
+from preprocess import inference_preprocess_sample, channel_extras
 
 HERE = Path(__file__).parent
 MODEL_PATH = HERE / "model.onnx"
@@ -31,7 +31,8 @@ class Model:
 
         # Reshape to batch dimension: (1, 4, 128) or (2, 4, 128)
         input_data = np.stack(crops, axis=0)
+        extra = np.repeat(channel_extras(x.series, x.meta["sample_rate"])[None], len(crops), axis=0)
 
         # Inference
-        logits = self.session.run(None, {self.input_name: input_data})[0]
+        logits = self.session.run(None, {"input": input_data, "extra": extra})[0]
         return int(np.argmax(logits.mean(axis=0)))

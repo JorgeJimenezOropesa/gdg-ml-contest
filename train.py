@@ -33,15 +33,16 @@ def train_one_epoch(
     )
 
     # Iterate over batches
-    for batch_x, batch_y in progress_bar:
+    for batch_x, batch_e, batch_y in progress_bar:
         batch_x = batch_x.to(device)
+        batch_e = batch_e.to(device)
         batch_y = batch_y.to(device)
 
         # Reset the gradients
         optimizer.zero_grad()
 
         # Run the model and compute backpropagation
-        logits = model(batch_x)
+        logits = model(batch_x, batch_e)
         loss = criterion(logits, batch_y)
         loss.backward()
 
@@ -79,11 +80,12 @@ def evaluate(
     total = 0
 
     with torch.no_grad():
-        for batch_x, batch_y in dataloader:
+        for batch_x, batch_e, batch_y in dataloader:
             batch_x = batch_x.to(device)
+            batch_e = batch_e.to(device)
             batch_y = batch_y.to(device)
 
-            logits = model(batch_x)
+            logits = model(batch_x, batch_e)
             loss = criterion(logits, batch_y)
 
             running_loss += loss.item() * batch_x.size(0)
@@ -238,13 +240,14 @@ def main() -> int:
     print("Exporting to onnx...")
     onnx_path = "model.onnx"
     dummy_input = torch.randn(1, 4, 128, device=device)
+    dummy_extra = torch.randn(1, 5, device=device)
     torch.onnx.export(
         model,
-        dummy_input,
+        (dummy_input, dummy_extra),
         onnx_path,
-        input_names=["input"],
+        input_names=["input", "extra"],
         output_names=["logits"],
-        dynamic_axes={"input": {0: "batch"}, "logits": {0: "batch"}},
+        dynamic_axes={"input": {0: "batch"}, "extra": {0: "batch"}, "logits": {0: "batch"}},
         opset_version=18,
     )
     print(f"Model exported directly to {onnx_path}")

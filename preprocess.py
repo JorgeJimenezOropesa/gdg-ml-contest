@@ -90,6 +90,14 @@ def despike(series: np.ndarray, t: float = 8.0) -> np.ndarray:
     out[spikes] = np.nan
     return out
 
+def channel_extras(series: np.ndarray, sample_rate: float) -> np.ndarray:
+    """5 extra inputs: robust log-scale of each channel minus their mean (clipped to +-3) + SR flag."""
+    x = fill_nan(series)
+    med = _median(x)
+    ls = np.log(1.4826 * _median(np.abs(x - med))[:, 0] + 1e-6)
+    ls = np.clip(ls - ls.mean(), -3.0, 3.0)
+    return np.append(ls, 1.0 if sample_rate >= 1.5 else 0.0).astype(np.float32)
+
 
 def normalize(series: np.ndarray) -> np.ndarray:
     """Apply per-sample, per-channel Z-score normalization in float32."""
